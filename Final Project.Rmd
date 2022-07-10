@@ -1,0 +1,464 @@
+---
+title: "Final project"
+author: "Seongu Lee"
+date: "3/3/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+<font size="11"> Abstract</font> 
+
+This project is about "How much will be our bills for next 1 year" I used data set about average bill. I used boxcox transformation and differencing to make data stationary. I used acf, pacf analysis and auto.arima to determine best sarima model. I used diagnostic tests to verify if the model is good to be used for forecast. Finally, I used prediction function to predict the future bills. 
+Based on the model selecting process, I indentified two models $\text{SARIMA}\ (2,0,1)\ \text{x}\ (1,1,0)_{12}$ and $\text{SARIMA}\ (1,0,1)\ \text{x}\ (2,1,1)_{12}$ . I examined plots of residuals, diagnostic tests,Aic and causality and invertibility. From those process, I identified model 1 was good to use for forecast. Finally, I got best model which was first one and I predicted the next 12 values(12 months)
+
+<font size="11"> Introduction</font> 
+
+I was curious about electric bills by time. If the weather is hot or cold, I need to use more electricity and It will cost me more. This dataset is about the electric bills and usage of electricity in Kwh from 2000 to 2015 in Austin Tx. Because people will use more electricity in summer or winter, I will expect that it will be high bills in summer and winter. Or, it will be different. My goal is to forecast the next one year electric bills using the previous data to prepare to pay the next bills.
+
+I plotted data without 12 values to check the forecasted values. I used the plot to determine if the dataset has trend, seasonality or variance changing. Next, I used box-cox transform to make data to stabilized the variance and differenced the data to remove the seasonality and trend. Also, I plotted pacf/acf and used auto arima function to determine best two models $\text{SARIMA}\ (2,0,1)\ \text{x}\ (1,1,0)_{12}$ and $\text{SARIMA}\ (1,0,1)\ \text{x}\ (2,1,1)_{12}$. And I used diagnostic tests("Box-Pierce, Ljung, shapiro), Aic and resdiuals plot to verify the model 1 was more good to use for forecasting. And model 1 was able to be used to forecast next 12 values successfully with confidence intervals. My goal is to predict the next 12 values and it will match to the real values.
+
+The data can be obtained on data.world. And I used rstudio for all processes
+\newpage
+
+<font size="11"> Analysis</font> 
+
+```{r, echo=F}
+data = read.csv("C:/Users/sungu/Desktop/kwh.csv") # Electricity bills in the Austin
+data$Average.Bill = as.numeric(gsub("\\$", "", data$Average.Bill)) # Average bill in Austin Tx
+employ= rev(data$Average.Bill) #dataset shows counterorder of time so reversed the order
+
+rate = ts(employ, start = c(2000,1),end = c(2015,3),frequency = 12) # dataset from Jan 2000 to Dec 2014
+test.rate = ts(employ, start = c(2015,4), end = c(2016,3), frequency = 12) # test dataset for forecast.
+this = employ[c(1: 183)]
+this.test = employ[c(184:195)]
+
+par(mfrow=c(1, 2))
+raw = ts(employ, start = c(2000,1),frequency = 12) # raw dataset 2000 to 2015 monthly average bill
+plot(raw,main = "Raw data")
+ts.plot(this,main = "Used data")
+fitt <- lm(this ~ as.numeric(1:length(this)))
+abline(fitt, col="red") 
+abline(h=mean(raw), col="blue")
+
+```
+This dataset has increasing, decreasing trend, volatility of the variance and strong seasonality. Since this data set doesn't look like normally distributed, I need use Box-Cox transformation to solve volatility of the variance. I don't see any heteroskedasticity, so I don't need to use any transforms(log, square).
+
+
+```{r,echo=F}
+#BoxCox Transform
+library(MASS)
+t = 1:length(rate)
+fit = lm(rate ~ t)
+bcTransform = boxcox(rate ~ t,plotit = TRUE)
+lambda = bcTransform$x[which(bcTransform$y == max(bcTransform$y))]
+cat('lambda = ',lambda)
+this.bc = (1/lambda)*(this^lambda-1) # for forecasting
+rate.bc = (1/lambda)*(rate^lambda-1)
+#print(rate.bc)
+#print(this.bc)
+
+```
+I applied boxcos to find lambda. From the lambda plot, the 95% of the confidence interval doesn't include 0, so I can use boxcox transformation to make variance stable
+lambda doesn't include zero. So, it is good to use boxcox transform. I also used the formula (1/lambda)*(x^lambda-1) for the boxcox transformation
+```{r}
+#compare plots
+par(mfrow=c(1, 2))
+plot(rate)
+plot(rate.bc)
+```
+plots look similar
+```{r}
+#Compare var
+var(rate)
+var(rate.bc) 
+```
+variance was reduced a lot with Box Cos transform so I was good to use the boxcox transform.
+```{r}
+hist(rate.bc)
+```
+Hist still doesn't look normally distributed. I need to make this more look normally distributed.
+
+```{r}
+# acf and pacf for transformed dataset.
+par(mfrow=c(1, 2))
+acf(rate.bc,lag.max = 60,main = "")
+pacf(rate.bc,lag.max = 60,main = "")
+title("BC transformed Time Series", line = -1, outer=TRUE) # 
+
+```
+The acf and pacf plots show variance became stable.This shows by years, but my dataset is months data. So, the lag shows different numbers.
+Also, by  plots, there is significant corrections every 12 lags. Also, plots show seasonality.
+
+
+```{r,echo=F}
+#Differencing at lag 1 to remove trend
+z1 = diff(rate.bc, 1)
+
+par(mfrow=c(1, 2))
+hist(z1,main = "De-Trendized")
+ts.plot(z1,main = "De-Trendized",ylab = expression('diff at 1'))
+```
+
+
+I differenced the box transformed data at lag 1 to remove trend. And trend was removed and looks normally distributed
+
+
+```{r,echo=F}
+z12 = diff(z1,12)
+ts.plot(z12,main = "De-Trendized AND De-Seasonalized",ylab = expression("diff at 1 and 12"))
+```
+
+The plot looks stationary
+
+```{r,echo=F}
+par(mfrow=c(1, 2))
+plot(decompose(z12))
+```
+Decomposition shows the de seasonalized and de trended data in one plot.
+Trend is gone and seasonal was reduced
+
+```{r,echo=F}
+hist(z12)
+```
+No more trend, reduced seasonality and no variance changing and normally distributed. Looks like little bit concentrate on the middle. But it is good to use.
+
+\newpage
+```{r,echo=F}
+library(tseries)
+adf.test(z12)
+cat("Variance: ", var(z12),"\n")#creased 
+cat('mean = ',mean(z12)) # mean almost zero
+```
+I differenced again the box transformed data at lag 12 to remove seasonality
+Variance decreased and mean is almost zero. 
+pvalue is 0.01 which is less then 0.05 from adf.test.
+The plots look good. The data is stationary
+
+\newpage
+I will use acf and pacf plots of stationary data to determine the models
+
+```{r,echo=F}
+#Plot ACF/PACF of differenced data
+
+acfplz <- acf(z12, lag.max = 60,plot=FALSE)
+pacfplz<- pacf(z12,lag.max = 60,plot=FALSE)
+
+## Transform the lags from years to months
+acfplz$lag <- acfplz$lag * 12
+pacfplz$lag <- pacfplz$lag * 12
+```
+
+```{r,echo=F}
+par(mfrow=c(1, 2))
+plot(acfplz, xlab="Lag (months)")
+plot(pacfplz, xlab="Lag (months)")
+title("Detrended and Deseasonalized Time Series", line = -1, outer=TRUE)
+```
+
+Based on the acf and pacf plots, d = 0 and D =1
+Also, there is significant peak at lag 12 and cut off after 0 from acf and significant peaks at 12,24,36 from pacf. So, P can be 1,2,3 and Q can be  0,1
+There are significant peaks at lag 1,4,11 from acf and significant peaks at lag 2,4 from pacf, so p can be 2,4 and q can be 1,4,11
+
+```{r,echo=F}
+library(forecast)
+# recommended model
+auto.arima(rate.bc)
+```
+
+Also ARIMA(1,0,1)(2,1,1)[12] can be a candidate based on auto. arima function
+\newpage
+```{r,echo=F}
+fit1<-arima(rate.bc, order=c(4,0,1), seasonal=list(order=c(1,1,0), period=12),method="ML")
+fit2<- arima(rate.bc, order=c(1,0,1), seasonal=list(order=c(2,1,1), period=12),method="ML")
+```
+
+Thus I identifed these two models for forecasting and I should decide the best one.
+
+* 1. $\text{SARIMA}\ (4,0,1)\ \text{x}\ (1,1,0)_{12}$
+      * $\text{AIC}=-1363.35$
+      * $((1+0.5622B – 0.5335B^2-0.1655B^3+0.085B^4)(1-B^{12})Y_t= (1+0.9642B)Z_t)$
+      
+* 2. $\text{SARIMA}\ (1,0,1)\ \text{x}\ (2,1,1)_{12}$
+      * $\text{AIC}=-1409.07$
+      * $((1-0.8693B)(1+0.2144B^{12}+0.3446B^{24})(1-B^{12})Y_t=(1-0.4665B)(1-0.5469B^{12})Z_t)$
+
+```{r,echo=F}
+#root
+cat("AR4 roots  = ", polyroot(c(1, 0.5622,-0.1655,0.085)),"\n")# AR4 model 1 
+cat("MA1 roots = ", polyroot(c(1, 0.9642 )),"\n") #MA1 for Model 1 
+cat("SAR1 roots = ", polyroot(c(1, -0.3910 )),"\n") #Sar model 1
+```
+
+Roots are outside of unit circle Therefore Model 1 is causal and invertible.
+
+```{r,echo=F}
+print(fit1)
+res<-residuals(fit1)
+plot(res, main="Residuals")
+```
+The plot of residuals look stationary
+
+```{r,echo=F}
+hist(res, col="light blue", xlab="", main="Histogram of Residuals")
+qqnorm(res);qqline(res)
+```
+The plot of the histogram looks symmetric and the QQ plot seems to be normally distributed.
+```{r,echo=F}
+cat("Mean ",mean(res),"\n")
+cat("var ",var(res),"\n")
+cat("lag ",sqrt(length(rate)+12),"\n")
+```
+lag should be square root of length of data
+Mean is almost zero and variance is small
+```{r,echo=F}
+#Diagnostic test
+Box.test(res,lag=14, type = c("Box-Pierce"), fitdf=5)
+Box.test(res,lag=14, type = "Ljung", fitdf=5)
+Box.test(res^2, lag=14, type = c("Ljung-Box"), fitdf=0) 
+shapiro.test(res)
+
+par(mfrow=c(1, 2))
+acf(res) 
+pacf(res)
+title("Model 1", line = -1, outer=TRUE)
+```
+Residuals for model 1 shows no trend, variance changing, no seasonal component. Histrogram and QQ plot shows that this is normally distributed. By the disagnostic tests, this model passed all test which shows greater than 0.05. ACF and Pacf show that there is a point beyond the interval. But except this every points are inside the interval so I can say this is white noise. Also, roots are outside unit circle. Therefore Model 1 is causal and invertible.Mean and var are also good looking from data
+
+\newpage
+
+```{r,echo=F}
+print("Analysis for model 2")
+cat("AR1 roots  = ", polyroot(c(1,-0.8693)),"\n")#AR1 model 2 
+cat("MA1 roots = ", polyroot(c(1, 0.2144,0.3446 )),"\n") #SAR3 for Model 2 
+cat("SAR1 roots = ", polyroot(c(1, -0.4665 )),"\n") #Ma1model 2
+cat("SAR1 roots = ", polyroot(c(1, -0.5469 )),"\n") #SMA1 model 2
+```
+
+model 2 is also causal and invertible.The roots are outside of unit circle
+
+```{r,echo=F}
+print(fit2)
+res<-residuals(fit2)
+plot(res, main="Residuals")
+```
+The plot of residuals look stationary
+
+```{r,echo=F}
+hist(res, col="light blue", xlab="", main="Histogram of Residuals")
+qqnorm(res);qqline(res)
+```
+The plot of the histogram looks symmetric and the QQ plot seems to be normally distributed.
+```{r,echo=F}
+cat("Mean ",mean(res),"\n")
+cat("var ",var(res),"\n")
+cat("lag ",sqrt(length(rate)+12),"\n")
+```
+lag should be square root of length of data
+Mean is almost zero and variance is small
+```{r,echo=F}
+#Diagnostic test
+Box.test(res,lag=14, type = c("Box-Pierce"), fitdf=5)
+Box.test(res,lag=14, type = "Ljung", fitdf=5)
+Box.test(res^2, lag=14, type = c("Ljung-Box"), fitdf=0) 
+shapiro.test(res)
+
+par(mfrow=c(1, 2))
+acf(res) 
+pacf(res)
+title("Model 2", line = -1, outer=TRUE)
+```
+Residuals for model 2 shows no trend, variance changing, no seasonal component. Histrogram and QQ plot shows that this is normally distributed. However, by the disagnostic tests, this model didnt pass Box-Ljung test which shows less than 0.05. Every points are inside the interval so I can say this is white noise. Also, roots are outside unit circle. Therefore Model 1 is causal and invertible.
+Even though, model 2 has smaller AIC, model 1 passed all test and other factors satisfied to be use for forecast such as more normally distributed.
+I will use model 1 to forecast the next 12 values.
+
+```{r,echo=F}
+
+#forecast(fit1)
+pred.tr <- predict(fit1, n.ahead = 12)
+U.tr= pred.tr$pred + 2*pred.tr$se
+L.tr= pred.tr$pred - 2*pred.tr$se 
+ts.plot(this.bc, xlim=c(1,length(this.bc)+12), ylim = c(min(this.bc),max(U.tr)))
+lines((length(this.bc)+1):(length(this.bc)+12),U.tr, col="blue", lty="dashed")
+lines((length(this.bc)+1):(length(this.bc)+12),L.tr, col="blue", lty="dashed")
+points((length(this.bc)+1):(length(this.bc)+12), pred.tr$pred, col="red")
+```
+This is the predicted plot of boxcox transformed data. The blue line shows the interval of predicted data values. This shows the predicted values well
+
+```{r,echo=F}
+#install.packages("astsa")
+library(astsa)
+pred.tr <- sarima.for(this, n.ahead=12, plot.all=F,
+p=4, d=0, q=1, P=1, D=1, Q=0, S=12)
+lines(184:195, pred.tr$pred, col="red")
+lines(184:195, this.test, col="blue")
+points(184:195, this.test, col="blue")
+legend("topleft", pch=1, col=c("red", "blue"),
+legend=c("Forecasted values", "True Values"))
+
+```
+This is the plot of forecasted values and real values. The real values are in the intervals of the forecast. This shows the model 1 forecasting is mostly accurate, since the value is in the intervals.
+Blue is the rue values and red is forecasted values.
+
+\newpage
+<font size="11"> Conclusion</font> 
+
+So, my goal was to predict the last 12 values with this process. And the goal was achieved since the prediction was working well.
+My model to predict the values was 
+$\text{SARIMA}\ (4,0,1)\ \text{x}\ (1,1,0)_{12}$
+
+detailed
+
+$((1+0.5622B – 0.5335B^2-0.1655B^3+0.085B^4)(1-B^{12})Y_t= (1+0.9642B)Z_t)$
+
+and this shows the white noise of residuals and passed all of the diagnostic tests.This was the reason I picked model 1 to forecast the data.
+
+Professor Raya Feldman and TA Youhong provide me information and lectures to finish my project. 
+
+
+\newpage
+<font size="11"> Reference</font> 
+
+Data from https://data.world/cityofaustin/d9pb-3vh7
+
+\newpage
+<font size="11"> Appendix</font> 
+
+```{r}
+data = read.csv("C:/Users/sungu/Desktop/kwh.csv") # Electricity bills in the Austin
+data$Average.Bill = as.numeric(gsub("\\$", "", data$Average.Bill)) # Average bill in Austin Tx
+employ= rev(data$Average.Bill) #dataset shows counterorder of time so reversed the order
+
+rate = ts(employ, start = c(2000,1),end = c(2015,3),frequency = 12) # dataset from Jan 2000 to Dec 2014
+test.rate = ts(employ, start = c(2015,4), end = c(2016,3), frequency = 12) # test dataset for forecast.
+this = employ[c(1: 183)]
+this.test = employ[c(184:195)]
+
+par(mfrow=c(1, 2))
+raw = ts(employ, start = c(2000,1),frequency = 12) # raw dataset 2000 to 2015 monthly average bill
+plot(raw,main = "Raw data")
+ts.plot(this,main = "Used data")
+fitt <- lm(this ~ as.numeric(1:length(this)))
+abline(fitt, col="red") 
+abline(h=mean(raw), col="blue")
+
+par(mfrow=c(1, 2))
+plot(rate)
+plot(rate.bc)
+
+#Compare var
+var(rate)
+var(rate.bc)
+hist(rate.bc)
+
+# acf and pacf for transformed dataset.
+par(mfrow=c(1, 2))
+acf(rate.bc,lag.max = 60,main = "")
+pacf(rate.bc,lag.max = 60,main = "")
+title("BC transformed Time Series", line = -1, outer=TRUE) #
+
+z1 = diff(rate.bc, 1)
+
+par(mfrow=c(1, 2))
+hist(z1,main = "De-Trendized")
+ts.plot(z1,main = "De-Trendized",ylab = expression('diff at 1'))
+
+z12 = diff(z1,12)
+ts.plot(z12,main = "De-Trendized AND De-Seasonalized",ylab = expression("diff at 1 and 12"))
+
+par(mfrow=c(1, 2))
+plot(decompose(z12))
+hist(z12)
+
+library(tseries)
+adf.test(z12)
+cat("Variance: ", var(z12),"\n")#creased 
+cat('mean = ',mean(z12)) # mean almost zero
+
+acfplz <- acf(z12, lag.max = 60,plot=FALSE)
+pacfplz<- pacf(z12,lag.max = 60,plot=FALSE)
+
+## Transform the lags from years to months
+acfplz$lag <- acfplz$lag * 12
+pacfplz$lag <- pacfplz$lag * 12
+
+par(mfrow=c(1, 2))
+plot(acfplz, xlab="Lag (months)")
+plot(pacfplz, xlab="Lag (months)")
+title("Detrended and Deseasonalized Time Series", line = -1, outer=TRUE)
+
+library(forecast)
+auto.arima(rate.bc)
+
+fit1<-arima(rate.bc, order=c(4,0,1), seasonal=list(order=c(1,1,0), period=12),method="ML")
+fit2<- arima(rate.bc, order=c(1,0,1), seasonal=list(order=c(2,1,1), period=12),method="ML")
+
+cat("AR4 roots  = ", polyroot(c(1, 0.5622,-0.1655,0.085)),"\n")# AR4 model 1 
+cat("MA1 roots = ", polyroot(c(1, 0.9642 )),"\n") #MA1 for Model 1 
+cat("SAR1 roots = ", polyroot(c(1, -0.3910 )),"\n") #Sar model 1
+
+print(fit1)
+res<-residuals(fit1)
+plot(res, main="Residuals")
+
+hist(res, col="light blue", xlab="", main="Histogram of Residuals")
+qqnorm(res);qqline(res)
+
+cat("Mean ",mean(res),"\n")
+cat("var ",var(res),"\n")
+cat("lag ",sqrt(length(rate)+12),"\n")
+#Diagnostic test
+Box.test(res,lag=14, type = c("Box-Pierce"), fitdf=5)
+Box.test(res,lag=14, type = "Ljung", fitdf=5)
+Box.test(res^2, lag=14, type = c("Ljung-Box"), fitdf=0) 
+shapiro.test(res)
+
+par(mfrow=c(1, 2))
+acf(res) 
+pacf(res)
+title("Model 1", line = -1, outer=TRUE)
+
+cat("AR1 roots  = ", polyroot(c(1,-0.8693)),"\n")#AR1 model 2 
+cat("MA1 roots = ", polyroot(c(1, 0.2144,0.3446 )),"\n") #SAR3 for Model 2 
+cat("SAR1 roots = ", polyroot(c(1, -0.4665 )),"\n") #Ma1model 2
+cat("SAR1 roots = ", polyroot(c(1, -0.5469 )),"\n") #SMA1 model 2
+
+print(fit2)
+res<-residuals(fit2)
+plot(res, main="Residuals")
+
+hist(res, col="light blue", xlab="", main="Histogram of Residuals")
+qqnorm(res);qqline(res)
+
+cat("Mean ",mean(res),"\n")
+cat("var ",var(res),"\n")
+cat("lag ",sqrt(length(rate)+12),"\n")
+#Diagnostic test
+Box.test(res,lag=14, type = c("Box-Pierce"), fitdf=5)
+Box.test(res,lag=14, type = "Ljung", fitdf=5)
+Box.test(res^2, lag=14, type = c("Ljung-Box"), fitdf=0) 
+shapiro.test(res)
+
+par(mfrow=c(1, 2))
+acf(res) 
+pacf(res)
+title("Model 2", line = -1, outer=TRUE)
+
+forecast(fit1)
+pred.tr <- predict(fit1, n.ahead = 12)
+U.tr= pred.tr$pred + 2*pred.tr$se
+L.tr= pred.tr$pred - 2*pred.tr$se 
+ts.plot(this.bc, xlim=c(1,length(this.bc)+12), ylim = c(min(this.bc),max(U.tr)))
+lines((length(this.bc)+1):(length(this.bc)+12),U.tr, col="blue", lty="dashed")
+lines((length(this.bc)+1):(length(this.bc)+12),L.tr, col="blue", lty="dashed")
+points((length(this.bc)+1):(length(this.bc)+12), pred.tr$pred, col="red")
+
+library(astsa)
+pred.tr <- sarima.for(this, n.ahead=12, plot.all=F,
+p=4, d=0, q=1, P=1, D=1, Q=0, S=12)
+lines(184:195, pred.tr$pred, col="red")
+lines(184:195, this.test, col="blue")
+points(184:195, this.test, col="blue")
+legend("topleft", pch=1, col=c("red", "blue"),
+legend=c("Forecasted values", "True Values"))
+
+```
